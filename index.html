@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>古文単語ダンジョン - 完全版</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Yuji+Syuku&display=swap');
+    
+    .font-pixel {
+      font-family: 'Press Start 2P', monospace, sans-serif;
+    }
+    .font-jp {
+      font-family: 'Yuji Syuku', serif;
+    }
+
+    /* アニメーション定義 */
+    @keyframes shake {
+      0%, 100% { transform: translate(0, 0); }
+      20%, 60% { transform: translate(-8px, 0); }
+      40%, 80% { transform: translate(8px, 0); }
+    }
+    .animate-shake {
+      animation: shake 0.4s ease-in-out;
+    }
+
+    @keyframes attack-player {
+      0% { transform: translateY(0); }
+      50% { transform: translateY(-30px) scale(1.1); }
+      100% { transform: translateY(0); }
+    }
+    .animate-attack {
+      animation: attack-player 0.3s ease-in-out;
+    }
+
+    @keyframes flash-red {
+      0%, 100% { background-color: transparent; }
+      50% { background-color: rgba(239, 68, 68, 0.4); }
+    }
+    .animate-flash {
+      animation: flash-red 0.4s ease-in-out;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col items-center justify-center p-2 sm:p-4 select-none">
+
+  <!-- ゲーム本体コンテナ -->
+  <div id="game-container" class="max-w-xl w-full bg-slate-900 border-4 border-amber-600 rounded-xl shadow-2xl overflow-hidden relative flex flex-col min-h-[620px]">
+    
+    <!-- 画面ヘッダーとステータスバー -->
+    <header class="bg-slate-950 border-b-2 border-amber-800 p-3 flex justify-between items-center text-xs sm:text-sm">
+      <div class="flex items-center gap-2">
+        <span class="text-amber-500 font-bold font-pixel">FLOOR:</span>
+        <span id="floor-text" class="text-white font-bold font-pixel text-base">1 / 5</span>
+      </div>
+      
+      <!-- サウンドコントロール -->
+      <button id="sound-btn" class="bg-slate-800 hover:bg-slate-700 text-amber-400 border border-amber-600 px-3 py-1 rounded flex items-center gap-1 font-bold">
+        <span id="sound-icon">🔊</span> <span id="sound-status">BGM ON</span>
+      </button>
+    </header>
+
+    <!-- メインビュー（スタート・バトル・結果画面） -->
+    <main class="flex-1 flex flex-col justify-between p-4 relative">
+      
+      <!-- フラッシュ用オーバーレイ -->
+      <div id="flash-overlay" class="absolute inset-0 pointer-events-none z-20"></div>
+
+      <!-- 1. スタート画面 -->
+      <div id="start-screen" class="flex-1 flex flex-col items-center justify-center text-center p-4">
+        <h1 class="text-3xl sm:text-4xl font-extrabold text-amber-500 mb-2 font-jp tracking-widest drop-shadow-lg">
+          古文単語ダンジョン
+        </h1>
+        <p class="text-slate-400 text-sm mb-2">〜 みるみるノート全177問の試練 〜</p>
+        <span class="text-xs bg-amber-950 text-amber-300 border border-amber-700 px-2 py-0.5 rounded-full mb-6">全プリント①〜⑪収録</span>
+        
+        <div class="mb-8 p-4 bg-slate-950 border border-slate-800 rounded-lg text-xs sm:text-sm text-slate-300 max-w-xs space-y-2 text-left">
+          <p>🗡️ 全177問からランダムで5問出題！</p>
+          <p>📜 正解すると敵にダメージ！</p>
+          <p>💥 不正解だとプレイヤーがダメージ！</p>
+        </div>
+
+        <button id="start-btn" class="bg-amber-600 hover:bg-amber-500 text-slate-950 font-black text-lg py-3 px-10 rounded-lg border-2 border-amber-300 shadow-lg transform active:scale-95 transition">
+          ダンジョンに入る
+        </button>
+      </div>
+
+      <!-- 2. バトル画面 -->
+      <div id="battle-screen" class="hidden flex-1 flex flex-col justify-between">
+        
+        <!-- モンスター表示エリア -->
+        <div class="relative bg-slate-950 border-2 border-slate-800 rounded-lg p-4 flex flex-col items-center justify-center min-h-[200px] overflow-hidden">
+          
+          <!-- モンスター情報 -->
+          <div class="w-full flex justify-between items-center text-xs mb-2 px-2">
+            <span id="monster-name" class="font-bold text-amber-400 font-jp text-base">ゴブリン</span>
+            <div class="w-32 bg-slate-800 rounded-full h-3 border border-slate-700 overflow-hidden">
+              <div id="monster-hp-bar" class="bg-red-600 h-full w-full transition-all duration-300"></div>
+            </div>
+          </div>
+
+          <!-- モンスターグラフィック (SVG) -->
+          <div id="monster-avatar" class="w-32 h-32 flex items-center justify-center transition-transform">
+            <!-- SVGがJavaScriptから挿入されます -->
+          </div>
+        </div>
+
+        <!-- プレイヤーHPバー -->
+        <div class="my-2 bg-slate-950 p-2 border border-slate-800 rounded-lg flex items-center justify-between">
+          <span class="text-xs font-bold text-emerald-400 font-pixel">PLAYER HP:</span>
+          <div class="w-2/3 bg-slate-800 rounded-full h-4 border border-slate-700 overflow-hidden">
+            <div id="player-hp-bar" class="bg-emerald-500 h-full w-full transition-all duration-300"></div>
+          </div>
+        </div>
+
+        <!-- 問題テキストエリア -->
+        <div class="bg-slate-950 border-2 border-amber-700/60 p-3 rounded-lg mb-3">
+          <p id="original-text" class="text-amber-200 font-jp text-base sm:text-lg font-bold mb-1"></p>
+          <p id="translation-text" class="text-slate-300 text-xs sm:text-sm"></p>
+        </div>
+
+        <!-- 選択肢ボタン -->
+        <div id="options-container" class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <!-- 選択肢がJavaScriptから作成されます -->
+        </div>
+
+        <!-- フィードバック & 次へボタン -->
+        <div id="feedback-area" class="hidden mt-2 p-3 bg-slate-950 border border-slate-800 rounded-lg text-center">
+          <p id="feedback-text" class="text-sm font-bold mb-2"></p>
+          <button id="next-btn" class="bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold py-1.5 px-6 rounded text-sm transition">
+            進む ➔
+          </button>
+        </div>
+      </div>
+
+      <!-- 3. リザルト（結果）画面 -->
+      <div id="result-screen" class="hidden flex-1 flex flex-col items-center justify-center text-center p-4">
+        <h2 id="result-title" class="text-3xl font-extrabold mb-2 font-jp"></h2>
+        <div id="result-icon" class="text-6xl mb-4"></div>
+        <p id="result-message" class="text-slate-300 text-sm mb-6"></p>
+
+        <button id="restart-btn" class="bg-amber-600 hover:bg-amber-500 text-slate-950 font-black text-lg py-3 px-8 rounded-lg border-2 border-amber-300 shadow-lg transform active:scale-95 transition">
+          もう一度挑む
+        </button>
+      </div>
+
+    </main>
+  </div>
+
+  <script>
+    // Web Audio API を用いた効果音＆レトロBGMシステム
+    class SoundSystem {
+      constructor() {
+        this.ctx = null;
+        this.enabled = true;
+        this.bgmTimer = null;
+        this.bgmStep = 0;
+      }
+
+      init() {
+        if (!this.ctx) {
+          this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+      }
+
+      playTone(freq, type, duration, vol = 0.1) {
+        if (!this.enabled || !this.ctx) return;
+        try {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = type;
+          osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+          gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + duration);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start();
+          osc.stop(this.ctx.currentTime + duration);
+        } catch (e) {}
+      }
+
+      playCorrect() {
+        this.playTone(523.25, 'sine', 0.1, 0.15);
+        setTimeout(() => this.playTone(659.25, 'sine', 0.15, 0.15), 100);
+        setTimeout(() => this.playTone(783.99, 'sine', 0.2, 0.15), 200);
+      }
+
+      playWrong() {
+        this.playTone(220, 'sawtooth', 0.15, 0.2);
+        setTimeout(() => this.playTone(180, 'sawtooth', 0.25, 0.2), 150);
+      }
+
+      playHit() {
+        this.playTone(120, 'square', 0.08, 0.2);
+      }
+
+      startBGM() {
+        if (this.bgmTimer) return;
+        this.bgmStep = 0;
+        const notes = [220, 233, 220, 207, 220, 261, 246, 207];
+        
+        this.bgmTimer = setInterval(() => {
+          if (this.enabled && this.ctx) {
+            const freq = notes[this.bgmStep % notes.length];
+            this.playTone(freq, 'triangle', 0.2, 0.04);
+            this.bgmStep++;
+          }
+        }, 250);
+      }
+
+      stopBGM() {
+        if (this.bgmTimer) {
+          clearInterval(this.bgmTimer);
+          this.bgmTimer = null;
+        }
+      }
+
+      playVictory() {
+        this.stopBGM();
+        const mel = [523, 659, 783, 1046];
+        mel.forEach((freq, i) => {
+          setTimeout(() => this.playTone(freq, 'triangle', 0.3, 0.2), i * 150);
+        });
+      }
+
+      playDefeat() {
+        this.stopBGM();
+        const mel = [300, 280, 260, 220];
+        mel.forEach((freq, i) => {
+          setTimeout(() => this.playTone(freq, 'sawtooth', 0.3, 0.2), i * 200);
+        });
+      }
+    }
+
+    const audio = new SoundSystem();
+
+    const monsters = [
+      { name: "スライム", svg: `<svg viewBox="0 0 100 100" class="w-full h-full fill-emerald-500 drop-shadow-md"><path d="M20,70 Q20,30 50,20 Q80,30 80,70 Q80,85 50,85 Q20,85 20,70 Z"/><circle cx="40" cy="50" r="5" fill="#fff"/><circle cx="60" cy="50" r="5" fill="#fff"/><circle cx="42" cy="51" r="2" fill="#000"/><circle cx="62" cy="51" r="2" fill="#000"/></svg>` },
+      { name: "スケルトン", svg: `<svg viewBox="0 0 100 100" class="w-full h-full fill-slate-300 drop-shadow-md"><circle cx="50" cy="40" r="25"/><rect x="42" y="65" width="16" height="20" fill="#cbd5e1"/><circle cx="40" cy="38" r="6" fill="#000"/><circle cx="60" cy="38" r="6" fill="#000"/><path d="M40 55 Q50 60 60 55" stroke="#000" stroke-width="3" fill="none"/></svg>` },
+      { name: "ダークゴブリン", svg: `<svg viewBox="0 0 100 100" class="w-full h-full fill-purple-600 drop-shadow-md"><polygon points="20,20 35,35 15,45"/><polygon points="80,20 65,35 85,45"/><circle cx="50" cy="50" r="25"/><circle cx="40" cy="48" r="5" fill="#facc15"/><circle cx="60" cy="48" r="5" fill="#facc15"/><path d="M42 62 Q50 55 58 62" stroke="#000" stroke-width="3" fill="none"/></svg>` },
+      { name: "ナイトメア", svg: `<svg viewBox="0 0 100 100" class="w-full h-full fill-indigo-500 drop-shadow-md"><path d="M30,80 L50,20 L70,80 Q50,90 30,80 Z"/><circle cx="43" cy="45" r="4" fill="#ef4444"/><circle cx="57" cy="45" r="4" fill="#ef4444"/><path d="M20,30 Q50,10 80,30" stroke="#818cf8" stroke-width="4" fill="none"/></svg>` },
+      { name: "魔王ドラゴン", svg: `<svg viewBox="0 0 100 100" class="w-full h-full fill-red-700 drop-shadow-md"><polygon points="10,20 30,40 20,70"/><polygon points="90,20 70,40 80,70"/><path d="M30,80 Q30,30 50,15 Q70,30 70,80 Z"/><circle cx="40" cy="40" r="6" fill="#facc15"/><circle cx="60" cy="40" r="6" fill="#facc15"/><circle cx="40" cy="40" r="2" fill="#000"/><circle cx="60" cy="40" r="2" fill="#000"/><path d="M35 60 Q50 75 65 60" stroke="#000" stroke-width="4" fill="none"/></svg>` }
+    ];
+
+    // プリント①〜⑪の全177問データ
+    const allQuestions = [
+      // プリント① (1〜15)
+      { text: "見れば率て来し女もなし。(伊勢)", translation: "見ると [   ]て来た女もいない。", options: ["話し", "連れ", "説得し", "続い"], answer: 1 },
+      { text: "女はこの男をと思ひつつ、親のあはすれども聞かでなむありける。(伊勢)", translation: "女はこの男を(夫にしよう)と思い続け、親が(他の男と) [   ]けれども聞き入れないでいた。", options: ["見合いさせようとする", "話をさせようとする", "結婚させようとする", "会うようにし向ける"], answer: 2 },
+      { text: "宮、例の、しのびておはしまいたり。(和泉式部)", translation: "宮は、いつものように、[   ]ていらっしゃった。", options: ["人に助けられ", "人目を避け", "懐かしく思っ", "恋心を包み隠し"], answer: 1 },
+      { text: "飽かず惜しと思はば、千年を過ぐすとも一夜の夢の心地こそせめ。(徒然)", translation: "(いくら生きても)[   ]命が惜しいと思うなら、千年を過ごしても一夜の夢のような短い気持ちがするだろう。", options: ["満ち足りず", "耐えられず", "安心できず", "満足して"], answer: 0 },
+      { text: "雲居よりもはるかに見ゆる人ありけり。(平中)", translation: "雲よりもはるかに(遠い存在と)[   ]女性がいた。", options: ["いえる", "見える", "付き合う", "思われる"], answer: 3 },
+      { text: "ひたすらに家ごとに乞ひありく。(方丈)", translation: "ひたすらに家ごとに物乞いして[   ]。", options: ["まわる", "過ごす", "歩く", "頭を下げる"], answer: 0 },
+      { text: "尼君の見上げたるに、少しおぼえたるところあれば、子なめりと見給ふ。(源氏・若紫)", translation: "尼君が見上げている顔立ちに、少し[   ]ところがあるので、子どものようだとご覧になる。", options: ["気づい", "似", "記憶し", "思われ"], answer: 1 },
+      { text: "いみじく心憂けれど、念じてものも言はず。(堤・はいずみ)", translation: "ひどくつらいが、[   ]てものも言わない。", options: ["遠慮し", "がまんし", "努力し", "悲観し"], answer: 1 },
+      { text: "いと悲しくおぼえけり。(大和)", translation: "たいそう悲しく[   ]た。", options: ["記憶し", "受け止め", "感じられ", "思われ"], answer: 2 },
+      { text: "暮れはつるまで、ながめ暮らしつ。(蜻蛉)", translation: "日がすっかり暮れるまで、[   ]で過ごした。", options: ["もの思いに沈ん", "歌を詠ん", "話し込ん", "ふさぎ込ん"], answer: 0 },
+      { text: "秋来ぬと目にはさやかに見えねども風の音にぞおどろかれぬる(古今)", translation: "秋がやって来たと、目にははっきり見えないけれど、風の音に(もう秋なのだと) 自然と[   ]たことだ。", options: ["気づい", "思い出し", "驚かされ", "身に染み感じ"], answer: 0 },
+      { text: "この世にののしり給ふ光源氏、かかるついでに見たてまつり給はむや。(源氏・若紫)", translation: "世間で[   ]ていらっしゃった光源氏を、このような機会に見申し上げなさったらどうか。", options: ["評判になっ", "笑い者になっ", "期待され", "非難され"], answer: 0 },
+      { text: "男、大和にある女を見て、よばひてあひにけり。(伊勢)", translation: "ある男が、大和の国に住む女を見て、求婚して[   ]た。", options: ["似合っ", "結婚し", "気に入っ", "会っ"], answer: 1 },
+      { text: "鳥獣もなき所にて一人食ひゐたり。(宇治)", translation: "鳥や獣もいない所で一人食っ[   ]た。", options: ["て座っ", "てしまっ", "てい", "て寝"], answer: 2 },
+      { text: "浅茅が宿に昔をしのぶこそ、色好むとは言はめ。(徒然)", translation: "茅の茂る荒れ果てた家で(恋人と過ごした) 昔を[   ]ことこそ、恋の情趣を解すると言えよう。", options: ["振り返らない", "封印する", "忘れ去る", "懐かしむ"], answer: 3 },
+
+      // プリント② (16〜35)
+      { text: "あやしき下となれども、(ソノ言葉ハ)聖人の戒めにかなへり。(徒然)", translation: "[   ]下賤の者であるが、(その言葉は)聖人の教訓に一致している。", options: ["よくない", "身分が低い", "もの足りない", "見知らぬ"], answer: 1 },
+      { text: "おぼつかなきもの。十二年の山籠りの法師の女親。(枕)", translation: "[   ]もの。十二年間の山籠りをしている僧の母親(の心)。", options: ["好ましい", "不本意な", "もどかしい", "気がかりな"], answer: 3 },
+      { text: "盗人あやしと思ひて、連子よりのぞきければ、若き女の死にて臥したるあり。(今昔)", translation: "盗人は[   ]と思って、連子窓からのぞいたところ、若い女で死んでよこたわっている女がいる。", options: ["興味深い", "不思議だ", "残念だ", "待ち遠しい"], answer: 1 },
+      { text: "さるべくおとなしき人々、何がしかがしといふいみじき源氏の武者たちをこそ、御送りに添へられたりけれ。(大鏡)", translation: "しかるべく[   ]人々で、何の誰それというすぐれた源氏の武者たちを、お見送りのために添えられた。", options: ["関係のある", "思慮分別がある", "学識の高い", "身分の高い"], answer: 1 },
+      { text: "月かげゆかしくは、南面に池を掘れ。さてぞ見る。(梁塵)", translation: "月明かりが[   ]ならば、屋敷の南正面に池を掘れ。そうして(池の水面に映る月を)見るのだ。", options: ["隠れる", "沈む", "いとおしい", "見たい"], answer: 3 },
+      { text: "かなしからん親のため、妻子のためには、恥をも忘れ、盗みもしつべきことなり。(徒然)", translation: "[   ]ような親のため、妻子のためには、恥も忘れ、盗みもしかねないものである。", options: ["寂しい", "いとしい", "恥ずかしい", "うっとうしい"], answer: 1 },
+      { text: "三寸ばかりなる人、いとうつくしうてゐたり。(竹取)", translation: "三寸ほどの人が、たいそう[   ]様子で座っている。", options: ["堂々とした", "大人びた", "かわいらしい", "趣深い"], answer: 2 },
+      { text: "人の顔に、とり分きてよしと見ゆる所は、度ごとに見れども、あなをかし、めづらしとこそおぼゆれ。(枕)", translation: "人の顔で、特によいと見える所は、たびごとに見ても、ああ美しい、[   ]と思われる。", options: ["いとしい", "すばらしい", "ありがたい", "珍しい"], answer: 1 },
+      { text: "いかでもの越しに対面して、おぼつかなく思ひつめたること、少しはるかさむ。(伊勢)", translation: "なんとかして物隔てにでも会って、[   ]思い重ねた心の中を、少し晴れやかにしたい。", options: ["腹立たしく", "待ち遠しく", "なんとなく", "つらく"], answer: 1 },
+      { text: "見すべきことありて、呼びにやりたる人の来ぬ、いとくちをし。(枕)", translation: "見せようというものがあって、呼びにやった人が来ないのは、とても[   ]。", options: ["悲しい", "悔しい", "残念だ", "無礼だ"], answer: 2 },
+      { text: "雨など降るもをかし。(枕)", translation: "(夏の夜に) 雨などが降るのも[   ]。", options: ["趣がある", "しみじみとする", "滑稽である", "感じがよい"], answer: 0 },
+      { text: "よき人はあやしきことを語らず。(徒然)", translation: "[   ]人は不思議なことを語らない(ものだ)。", options: ["情趣のわかる", "よい", "普通の", "身分が高く教養がある"], answer: 3 },
+      { text: "ありがたきもの。姑にほめらるる婿。また、姑に思はるる嫁の君。(枕)", translation: "[   ]もの。舅にほめられる婿。また、姑に愛されるお嫁さん。", options: ["めったにない", "頼もしい", "いてほしい", "奥ゆかしい"], answer: 0 },
+      { text: "死にけりと聞きて、いといみじかりけり。(大和)", translation: "死んだと聞いて、実に[   ]た。", options: ["動揺し", "安心し", "とても悲しかっ", "うれしかっ"], answer: 2 },
+      { text: "秋の月は、限りなくめでたきものなり。(徒然)", translation: "秋の月は、この上なく[   ]ものである。", options: ["はなはだしい", "めったにない", "すばらしい", "めでたい"], answer: 2 },
+      { text: "友とするにわろき者、七つあり。(徒然)", translation: "友とするのに[   ]者が、七ついる。", options: ["納得いかない", "おかしな", "ふさわしい", "よくない"], answer: 3 },
+      { text: "世を捨てて山に入る人山にてもなほ憂き時はいづちゆくらむ(古今)", translation: "俗世間を捨てて山に入る人は、山においてもやはり[   ]ときは(今度は) どこへ行くのだろう。", options: ["わびしい", "悲しい", "むなしい", "つらい"], answer: 3 },
+      { text: "ひとつ子にさへありければ、いとかなしうし給ひけり。(伊勢)", translation: "そのうえ一人っ子でもあったので、たいそう[   ]なさった。", options: ["かわいがり", "気安くし", "思い悩み", "厳しくし"], answer: 0 },
+      { text: "前栽の草木まで、心のままならず作りなせるは、見る目も苦しく、いとわびし。(徒然)", translation: "庭の植え込みの草や木までも、意図的に作り上げているのは、見た目にも不愉快で、たいへん[   ]。", options: ["興ざめだ", "迷惑だ", "面倒だ", "愚かだ"], answer: 0 },
+      { text: "つれづれわぶる人は、いかなる心ならん。まぎるる方なく、ただ一人あるのみこそよけれ。(徒然)", translation: "することのない状態を[   ]人は、どのような心なのだろう。", options: ["物足りないと感じる", "つらいと嘆く", "やめようと思う", "おもしろく感じる"], answer: 1 },
+
+      // プリント③ (36〜50)
+      { text: "暮るるまで御物語し給ひて、大宮も渡り給ひぬ。(宇津保)", translation: "暮れるまでお[   ]をなさって、大宮もお帰りになった。", options: ["手紙", "物語", "うわさ", "話"], answer: 3 },
+      { text: "年ごろ思ひつること、果たし侍りぬ。(徒然)", translation: "[   ]思ってきたことを、果たしました。", options: ["この年になって", "長年", "今年", "最近"], answer: 1 },
+      { text: "せちにもの思へる気色なり。(竹取)", translation: "ひどくもの思いにふけっている[   ]である。", options: ["その時", "ばかり", "様子", "性格"], answer: 2 },
+      { text: "鏡には色・かたちなきゆゑに、よろづの影来りて映る。(徒然)", translation: "鏡には色も形もないので、さまざまな[   ]が来て映る。", options: ["人", "光", "姿", "色"], answer: 2 },
+      { text: "わづかに二つの矢、師の前にて一つをおろかにせんと思はんや。(徒然)", translation: "たった二本の矢である、師匠の前で(そのうちの) 一本を[   ]しようと思うだろうか(、いや思わない)。", options: ["下手に", "ばかに", "ほどほどに", "おろそかに"], answer: 3 },
+      { text: "滝の音水の声、あはれに聞こゆる所なり。(宇津保)", translation: "滝の音や川の音が、[   ]聞こえる所だ。", options: ["悲しく", "ゆったりと", "はっきりと", "趣深く"], answer: 3 },
+      { text: "つひに本意のごとくあひにけり。(伊勢)", translation: "しまいに[   ]どおり結婚した。", options: ["親の期待", "慎重な計画", "かねてからの願い", "二人の約束"], answer: 2 },
+      { text: "同じほど、それより下の更衣たちは、ましてやすからず。(源氏・桐壺)", translation: "同じ[   ]、(あるいは)それより低い地位の更衣たちは、なおさら気持ちが穏やかでない。", options: ["様子", "身分", "財産", "出身"], answer: 1 },
+      { text: "口惜しといふもおろなり。(増鏡)", translation: "残念だという[   ]。", options: ["のもばかばかしい", "言葉では言い尽くせない", "のも当然である", "言葉を口にしてはいけない"], answer: 1 },
+      { text: "つれづれに思ひつづくるも、うち返しいとあちきなし。(源氏・柏木)", translation: "[   ]思い続けているのだが、考えれば考えるほどまったく情けない。", options: ["大変ばかばかしく", "しんみりともの寂しく", "とりとめもなく", "暇がないときに"], answer: 2 },
+      { text: "あはれなる人を見つるかな。(源氏・若紫)", translation: "[   ]人を見たものだ。", options: ["みすぼらしい", "かわいらしい", "ふさわしい", "気品がある"], answer: 1 },
+      { text: "世の中に長恨歌といふ文を、物語にかきてある所あんなり。(更級)", translation: "この世間に「長恨歌」という[   ]を、(仮名の)物語に書き直して持っている人がいるそうだ。", options: ["文章", "本", "漢詩", "手紙"], answer: 2 },
+      { text: "その人、かたちよりは心なむまさりたりける。(伊勢)", translation: "その人は、[   ]よりは心がすぐれていた。", options: ["容貌", "評判", "以前", "行動"], answer: 0 },
+      { text: "それ、人の友とあるものは、富めるをたふとみ、ねんごろなるを先とす。(方丈)", translation: "そもそも、世間の友人というものは、金のある者を尊び、[   ]者を重んじて第一にする。", options: ["権力のある", "尊敬できる", "美しい", "親しい"], answer: 3 },
+      { text: "少しの地をも、いたづらにおかんことは、益なきことなり。(徒然)", translation: "少しの土地も、[   ](空けて)おくようなことは、無益なことだ。", options: ["わざと", "そのまま", "むだに", "長い間"], answer: 2 },
+
+      // プリント④ (51〜66)
+      { text: "大門のかたに、馬のいななく声して、人のあまたあるけはひしたり。(蜻蛉)", translation: "大門の方に、馬のいななく声がして、人が[   ]いる様子がした。", options: ["急いで", "数人", "たくさん", "少しずつ"], answer: 2 },
+      { text: "前の世にも御契りや深かりけむ、世になく清らなる玉の男皇子さへ生まれ給ひぬ。(源氏・桐壺)", translation: "(帝と桐壺の更衣は) 前世でもご[   ]が深かったのだろうか、世にまたとなく美しい玉のような皇子までがお生まれになった。", options: ["身分", "宿縁", "情愛", "関係"], answer: 1 },
+      { text: "いかでこのかぐや姫を得てしがな、見てしがな。(竹取)", translation: "[   ]このかぐや姫を手に入れたい、妻としたい。", options: ["早く", "どうにかして", "いつかは", "なぜか"], answer: 1 },
+      { text: "つた・くず・朝顔、いづれもいと高からず、ささやかなる垣に、繁からぬ、よし。(徒然)", translation: "(秋草として)葛・朝顔は、どれも[   ]高くなく、小さな垣根に、密生していないのが、よい。", options: ["たいして", "まったく", "とても", "いっそう"], answer: 2 },
+      { text: "げにただ人にはあらざりけり。(竹取)", translation: "[   ](かぐや姫は)普通の人ではなかったのだ。", options: ["おそらく", "決して", "なるほど", "いかにも"], answer: 3 },
+      { text: "や、な起こしたてまつりそ。幼き人は寝入り給ひにけり。(宇治)", translation: "おい、お起こし申し上げる[   ]。幼い人は眠ってしまわれた。", options: ["のか", "なぞ", "のだ", "な"], answer: 3 },
+      { text: "門をほとほとと叩けば、やがて弾きやみ給ひぬ。(平家)", translation: "門をとんとんとたたくと、(小督は)[   ](琴を) 弾くのをやめなさった。", options: ["すぐに", "その後しだいに", "一瞬", "念のため"], answer: 0 },
+      { text: "月に二度ばかりの御契りなめり。(源氏・松風)", translation: "月に二度ほどの[   ]であるようだ。", options: ["宿縁", "外出", "愛情", "逢瀬"], answer: 3 },
+      { text: "命を奪はん事、いかでかいたましからざらん。(徒然)", translation: "命を奪うようなことが、[   ]かわいそうでないだろうか(、いやかわいそうだ)。", options: ["まったく", "どれほど", "どうして", "少しも"], answer: 2 },
+      { text: "女、いと悲しくて、しりに立ちて追ひ行けど、え追ひつかで、清水のある所に伏しにけり。(伊勢)", translation: "女は、ひどく悲しくて、(男の)あとを追って行ったが、追いつくことが[   ]、清水のある所に倒れてしまった。", options: ["難しく", "できて", "できず", "できそうになく"], answer: 2 },
+      { text: "和歌こそ、なほをかしきものなれ。(徒然)", translation: "和歌は、[   ]趣深いものである。", options: ["思っていた以上に", "とても", "本当に", "やはり"], answer: 3 },
+      { text: "さらに人に交はることなし。(徒然)", translation: "[   ]人とつき合うことが[   ]。", options: ["その上〜ない", "すぐに〜ない", "まったく〜ない", "いっそう〜ない"], answer: 2 },
+      { text: "なさけある人にて、瓶に花をさせり。(伊勢)", translation: "[   ]のある人で、瓶に花を挿してある。", options: ["人目を気にする心", "情愛", "思いやり", "情趣を解する心"], answer: 3 },
+      { text: "いかでさることは知りしぞ。(枕)", translation: "[   ]そのようなことを知っていたのか。", options: ["もう", "いつから", "本当に", "どうして"], answer: 3 },
+      { text: "かくて、翁やうやう豊かになりゆく。(竹取)", translation: "こうして、(竹取の) 翁は[   ]豊かになっていく。", options: ["かろうじて", "すぐに", "やっと", "だんだん"], answer: 3 },
+      { text: "薬も食はず。やがて起きもあがらで、病み臥せり。(竹取)", translation: "薬も飲まない。[   ]起き上がらないで、病気になって臥せっている。", options: ["そのまま", "そうして", "あまり", "まったく"], answer: 0 },
+
+      // プリント⑤ (67〜83)
+      { text: "春は藤波を見る。紫雲のごとくして、西方ににほふ。(方丈)", translation: "春は藤の花房が波のようになびくさまを見る。紫雲のようで、西方に[   ]。", options: ["美しく花が咲く", "ほんのり色づく", "美しく照り映える", "かすかに匂う"], answer: 2 },
+      { text: "雨露をふせぐまうけもあり。(雨月)", translation: "雨露を防ぐ[   ]もしてある。", options: ["仕掛け", "経験", "用意", "服装"], answer: 2 },
+      { text: "絵に描ける楊貴妃の容貌は、筆限りありければ、いとにほひ少なし。(源氏・桐壺)", translation: "絵に描いた楊貴妃の容貌は、筆に限界があったので、じつに[   ]が少ない。", options: ["ちょっとした細やかさ", "つややかな美しさ", "表現の魅力", "大胆さ"], answer: 1 },
+      { text: "大傘一つまうけよ。(落窪)", translation: "大きな傘を一つ[   ]。", options: ["準備しろ", "処分しろ", "修理しろ", "工夫しろ"], answer: 0 },
+      { text: "ならはぬ鄙の住まひこそ、かねて思ふも悲しけれ。(平家)", translation: "[   ]ない田舎の生活は、あらかじめ想像するのも悲しいことだ。", options: ["感じ", "知ら", "慣れ", "好ま"], answer: 2 },
+      { text: "良秀がよぢり不動とて、今に人々めで合へり。(宇治)", translation: "今でも人々が[   ]合っている。", options: ["感嘆し", "けなし", "ほめ", "同情し"], answer: 2 },
+      { text: "月の出でたらむ夜は、見おこせ給へ。(竹取)", translation: "月が出ているような夜は、[   ]てください。", options: ["しっかりと見", "周りを見渡し", "こちらの方を見", "見るのをやめ"], answer: 2 },
+      { text: "親たちかしづき給ふこと限りなし。(堤・虫めづる姫君)", translation: "親たちが(姫君を)[   ]なさすることはこの上もない。", options: ["近くにおき", "心から愛し", "大切に養育し", "粗略に扱い"], answer: 2 },
+      { text: "郎等までに物かづけたり。(土佐)", translation: "従者にいたるまでに物を[   ]た。", options: ["かけ", "いただい", "与え", "かぶっ"], answer: 2 },
+      { text: "せちによばひければあひにけり。その朝に文もおこせず。(大和)", translation: "その翌朝に手紙も[   ]ない。", options: ["送ら", "書かせ", "よこさ", "渡さ"], answer: 2 },
+      { text: "例よりはひきつくろひて書きて、うつろひたる菊にさしたり。(蜻蛉)", translation: "いつもより気を配って書いて、[   ]た菊の花にさした。", options: ["色が移っ", "咲き誇っ", "色が変わっ", "枯れ果て"], answer: 2 },
+      { text: "初心の人、二つの矢を持つことなかれ。後の矢を頼みて、初めの矢になほざりの心あり。(徒然)", translation: "後の矢を[   ]て、初めの矢(を射ること)においていい加減な気持ちがある。", options: ["温存し", "大事にし", "あてにし", "気にし"], answer: 2 },
+      { text: "これ、昔、名高く聞こえたる所なり。(宇治)", translation: "ここは、昔、有名で[   ]た所である。", options: ["世間に知られ", "人が集まっ", "人がうわさし", "悪評で知られ"], answer: 0 },
+      { text: "この猫を北面にも出ださず、思ひかしづく。(更級)", translation: "この猫を北向きの部屋にも出さず、心にかけて[   ]。", options: ["お仕えする", "尊重する", "大切に世話をする", "愛する"], answer: 2 },
+      { text: "とりどりに物の音ども調べあはせて遊び給ふ、いとおもしろし。(源氏・花宴)", translation: "それぞれ思い思いに楽器の音色を整えて[   ]なさるのは、とても興趣がある。", options: ["管絃を楽しみ", "趣を変え", "ふざけ合い", "言い騒ぎ"], answer: 0 },
+      { text: "沖より舟どものうたひののしりて漕ぎ行くなども聞こゆ。(源氏・須磨)", translation: "沖を通っていくつもの舟が大声で歌いながら漕いで行くのなども[   ]。", options: ["うわさに聞く", "見える", "知っている", "聞こえる"], answer: 3 },
+      { text: "下簾の狭間の開きたるより、この男まもれば、わが妻に似たり。(大和)", translation: "(牛車の)下簾のすきまの開いている所から、この男が(車の中を)[   ]と、自分の妻に似ている。", options: ["訪ねる", "見つめる", "眺める", "調べる"], answer: 1 },
+
+      // プリント⑥ (84〜99)
+      { text: "子三人を呼びて語りけり。二人の子は、情けなくいらへてやみぬ。(伊勢)", translation: "二人の子は、そっけなく[   ]て終わった。", options: ["行っ", "言っ", "答え", "話し"], answer: 2 },
+      { text: "男、「みやこへいなむ」といふ。(伊勢)", translation: "男は、「都へ[   ]つもりだ」と言う。", options: ["行く", "とどまる", "急ぐ", "帰る"], answer: 3 },
+      { text: "おぼつかなく思しわたることの筋を聞こゆれば、いと奥ゆかしけれど。(源氏・橋姫)", translation: "(薫が)[   ]不審にお思いになっていたことの方面を申し上げるので…", options: ["かって", "少し", "ずっと", "なんとなく"], answer: 2 },
+      { text: "心地感ひにけり。(伊勢)", translation: "気持ちが[   ]てしまった。", options: ["乱れ", "高揚し", "落ち着い", "移っ"], answer: 0 },
+      { text: "その人、ほどなく失せにけりと聞き侍りし。(徒然)", translation: "その人は、間もなく[   ]たと聞きました。", options: ["横になっ", "亡くなっ", "病気になっ", "失踪し"], answer: 1 },
+      { text: "勢多の橋みな崩れて、渡りわづらふ。(更級)", translation: "勢多の橋がみな崩れて、渡る[   ]。", options: ["のに困る", "気がしない", "すべがない", "のをおきらめる"], answer: 0 },
+      { text: "行ひをだにせむ。(大和)", translation: "せめて[   ]だけでもしよう。", options: ["よいこと", "お礼", "仏道の修行", "行ってみること"], answer: 2 },
+      { text: "心ざし深かりける人、行きとぶらひけるを、ほかに隠れにけり。(伊勢)", translation: "愛の深かった男が、(女の所へ) 行って[   ]たのだが…", options: ["弔問し", "声かけ", "訪れ", "契っ"], answer: 2 },
+      { text: "喜怒これにさはらずして、物のためにわづらはず。(徒然)", translation: "喜怒の感情が邪魔となることなく、物事のために[   ]ない。", options: ["思い悩ま", "勘違いし", "変節し", "興奮し"], answer: 0 },
+      { text: "梅の香をかしきを見出だしてものしたまふ。(源氏・末摘花)", translation: "梅がよい匂いで咲いているのを部屋の中から眺めて[   ]。", options: ["物思いにふけっている", "いらっしゃる", "座っている", "住んでいる"], answer: 1 },
+      { text: "風の吹きまどひたるさま、恐ろしげなること、命かぎりつと思ひまどはる。(更級)", translation: "風が[   ]吹いている様子の恐ろしそうなことは…", options: ["急に", "静かに", "ひどく", "珍しく"], answer: 2 },
+      { text: "かの御法事などし給ふにもいかめしうとぶらひきこえ給へり。(源氏・紅葉賀)", translation: "ご法事などなさるときにも丁重に[   ]申し上げなさった。", options: ["取り扱い", "弔問し", "敬意を表し", "あいさつし"], answer: 1 },
+      { text: "帝の御前と思ふに臆して、わななきてえ吹かざりけり。(十訓)", translation: "天皇の御前と思うと怖じ気づいて、(体が)[   ]て(笛を)吹くことができなかった。", options: ["ふるえ", "言うことを聞かなく", "動かなく", "冷たくなっ"], answer: 0 },
+      { text: "我をばいづちへ具して行かむとするぞ。(平家)", translation: "私をどこに[   ]て行こうとするのか。", options: ["連れ", "置い", "乗せ", "隠し"], answer: 0 },
+      { text: "日ごろものしつる人、今日ぞ帰りぬる。(蜻蛉)", translation: "数日来(私と一緒に)[   ]人が、今日帰ってしまう。", options: ["おりまし", "居", "申し上げ", "いらっしゃっ"], answer: 3 },
+      { text: "持仏据ゑたてまつりて行ふ尼なりけり。(源氏・若紫)", translation: "持仏を安置申し上げて[   ]尼であった。", options: ["講義する", "参詣する", "指図する", "仏道の修行をする"], answer: 3 },
+
+      // プリント⑦ (100〜115)
+      { text: "その日の、髪上げうるはしき姿、唐絵ををかしげに描きたるやうなり。(紫式部)", translation: "その日の、(内侍の)髪を結いあげた[   ]姿は、まるで中国風の絵を美しく描いたようだ。", options: ["当世風な", "端正な", "頼もしい", "かわいらしい"], answer: 1 },
+      { text: "この山に籠りゐて後、やむごとなき人のかくれ給へるもあまた聞こゆ。(方丈)", translation: "(私が)この山にこもってからあと、[   ]方々がお亡くなりになったことも数多く耳に入る。", options: ["優美な", "上品な", "普通な", "高貴な"], answer: 3 },
+      { text: "取りたてて、はかばかしき後見しなければ、事ある時は、なほ拠りどころなく心細げなり。(源氏・桐壺)", translation: "格別に、[   ]後ろ盾がないので、何かあらたまったことがあるときは心細そうだ。", options: ["身分の高い", "とるに足りない", "しっかりした", "ちょっとした"], answer: 2 },
+      { text: "ただ人も、舎人など賜はるきはは、ゆゆしと見ゆ。(徒然)", translation: "普通の貴族でも、警護の官人などをいただく身分の人は、[   ]と思われる。", options: ["恐ろしい", "すばらしい", "悪くはない", "珍しい"], answer: 1 },
+      { text: "風吹き、波荒ければ、船出ださず。これかれ、かしこく嘆く。(土佐)", translation: "だれもかれも、[   ]嘆息する。", options: ["急に", "風流に", "気の毒に", "非常に"], answer: 3 },
+      { text: "神楽こそ、なまめかしく、おもしろけれ。(徒然)", translation: "神楽こそ、優雅であり、[   ]。", options: ["すぐれている", "興趣がある", "大切だ", "遊び心がある"], answer: 1 },
+      { text: "いといはけなき御ありさまなれば、乳母たち近く候ひけり。(源氏・若菜上)", translation: "ひどく[   ]ご様子なので、乳母たちがおそば近くに控えていた。", options: ["頼りない", "幼い", "楽しい", "かわいい"], answer: 1 },
+      { text: "帝の御位は、いともかしこし。(徒然)", translation: "帝の御位は、とても[   ]。", options: ["重大だ", "高貴だ", "おそれ多い", "すばらしい"], answer: 2 },
+      { text: "造れるさま木深く、いたき所まさりて見どころある住まひなり。(源氏・明石)", translation: "(家の)造り具合は木立が深く、[   ]所が多くて見る価値のある住まいである。", options: ["すばらしい", "自然な", "趣深い", "ありがたい"], answer: 0 },
+      { text: "梨の花、世にすさまじきものにして、近うもてなさず、はかなき文付けなどだにせず。(枕)", translation: "梨の花は、実に興ざめなものとして、身近にもてはやさず、[   ]手紙を結びつけたりさえしない。", options: ["優雅な", "すてきな", "ちょっとした", "質素な"], answer: 2 },
+      { text: "熊谷、あまりにいとほしくて、いづくに刀を立つべしともおぼえず。(平家)", translation: "熊谷は、あまりに[   ]、どこに刀を突き立てたらよいかもわからない。", options: ["恐ろしそうで", "たいへんそうで", "幼そうで", "かわいそうで"], answer: 3 },
+      { text: "墨染めの御姿あらまほしう清らなるも、うらやましく見たてまつり給ふ。(源氏・柏木)", translation: "黒い僧衣のお姿が[   ]上品で美しいのも、うらやましく見申し上げなさる。", options: ["理想的に", "高貴で", "きらびやかに", "質素で"], answer: 0 },
+      { text: "すべて、いとも知らぬ道の物語したる、かたはらいたく聞きにくし。(徒然)", translation: "何事でも、たいして知らない方面の話をしているのは、(はたで聞いていて)[   ]聞き苦しいものだ。", options: ["見苦しく", "おもしろくなく", "心細く", "難しく"], answer: 0 },
+      { text: "やさしう申したるものかな。(平家)", translation: "[   ]申したことよ。", options: ["遠慮がちに", "穏やかに", "けなげに", "簡単に"], answer: 2 },
+      { text: "ゆゆしき身に侍れば、(若宮ガ)かくておはしますも、いまいましう、かたじけなくなむ。(源氏・桐壺)", translation: "(私は娘に先立たれた)[   ]身ですので…", options: ["大切な", "嫌な", "立派な", "不吉な"], answer: 3 },
+      { text: "いみじうやさしかりける人の妻に成りにけり。(古本)", translation: "たいそう[   ]た人の妻になった。", options: ["有名だっ", "心やさしかっ", "裕福だっ", "優美だっ"], answer: 3 },
+
+      // プリント⑧ (116〜132)
+      { text: "月見るとて上げたる格子下ろすは、何者のするぞ。いと便なし。(大鏡)", translation: "月を見るといって上げてある格子を下ろすのは、何者がするのか。実に[   ]。", options: ["おかしなことだ", "困ったことだ", "冷淡なことだ", "平凡なことだ"], answer: 1 },
+      { text: "「飽かず口惜し」と、言ふかひなき法師、童べも、涙を落としあへり。(源氏・若紫)", translation: "「心残りで残念だ」と、[   ]法師や、子どもの召使いも、涙を流し合っている。", options: ["取るに足りない", "関係がない", "名前も知らない", "うわさに聞こえた"], answer: 0 },
+      { text: "ひたすら世をむさぼる心のみ深く、もののあはれも知らずなりゆくなん、あさましき。(徒然)", translation: "名誉や富をむさぼる心ばかりが深くなり、情趣も解さなくなってゆくのは、[   ]。", options: ["情けない", "わからない", "意地汚い", "ばかげている"], answer: 0 },
+      { text: "おろかなる人は、「用なき歩きは、よしなかりけり」とて来ずなりにけり。(竹取)", translation: "思いのいい加減な人は、「無用な出歩きは[   ]ことだった」と言って来なくなった。", options: ["あてにならない", "愛情がない", "予定にない", "つまらない"], answer: 3 },
+      { text: "花びらの端に、をかしき匂ひこそ、心もとなうつきためれ。(枕)", translation: "趣深い色つやが、[   ]ほどついているようだ。", options: ["不安な", "かすかな", "自然な", "はっきりしない"], answer: 3 },
+      { text: "あさましきまであいなう、面ぞ赤むや。(枕)", translation: "あきれるほど[   ]、顔が赤らむことよ。", options: ["急に", "本当に", "むやみに", "自然に"], answer: 2 },
+      { text: "あぢきなきことに心を占めて、生ける限りこれを思ひ悩むべきなめり。(源氏・若紫)", translation: "[   ]ことに心を奪われて、生きている間はこれを悩まなければならないようだ。", options: ["どうにもならない", "とりとめのない", "手の届かない", "理由のない"], answer: 0 },
+      { text: "この酒をひとり食べんがさうざうしければ、申しつるなり。(徒然)", translation: "この酒を一人で飲むようなのが[   ]ので、お呼びしたのです。", options: ["もったいない", "物足りない", "縁起でもない", "落ち着かない"], answer: 1 },
+      { text: "さがなき童べどものつかまつりける、奇怪にさうらふことなり。(徒然)", translation: "[   ]子どもらがいたした、けしからぬことでございます。", options: ["愚かな", "いたずらな", "幼い", "卑しい"], answer: 1 },
+      { text: "遅桜、またすさまじ。(徒然)", translation: "遅咲きの桜は、これまた[   ]。", options: ["格別だ", "凡庸だ", "興ざめだ", "風流だ"], answer: 2 },
+      { text: "用ありて行きたりとも、そのこと果てなば、とく帰るべし。久しくゐたる、いとむつかし。(徒然)", translation: "長居をしているのは、(相手にとって)とても[   ]。", options: ["やかましい", "わずらわしい", "憎らしい", "物足りない"], answer: 1 },
+      { text: "やすからず思されけれど、なほつれなく同じさまにて過ぐし給ふ。(源氏・若菜下)", translation: "穏やかでなくお思いになったけれど、やはり[   ](いつもと)同じ様子でお過ごしになる。", options: ["憮然として", "平然として", "依然として", "毅然として"], answer: 1 },
+      { text: "かくいふかひなき死をさへせむことのかなしさ。(大鏡)", translation: "このように[   ]死に方までするということの悲しいことよ。", options: ["情けない", "ひどい", "たわいない", "頼りない"], answer: 0 },
+      { text: "女君は、暑くむつかしとて、御髪すまして、少しさはやかにもてなし給へり。(源氏・若菜下)", translation: "女君は、暑く[   ]といって、御髪を洗って…", options: ["うっとうしい", "難しい", "つまらない", "じれったい"], answer: 0 },
+      { text: "まだきに騒ぎて、あいなきもの恨みし給ふな。(源氏・若菜上)", translation: "まだそのときにならないうちに騒ぎ立てて、[   ]恨みごとをなさいますな。", options: ["むやみに", "不快な", "筋違いな", "すぐに"], answer: 2 },
+      { text: "あらぬよしなき者の名のりして来たるも、すさまじといふはおろなり。(枕)", translation: "別の[   ]人が名のってやって来たのも、本当に興ざめだ…", options: ["たわいない", "方法がない", "関係がない", "ふがいない"], answer: 2 },
+      { text: "心地の悪しく、ものの恐ろしきをり、夜の明くるほど、いと心もとなし。(枕)", translation: "夜が明けるときが、ひどく[   ]。", options: ["はっきりしない", "心配だ", "不吉だ", "待ち遠しい"], answer: 3 },
+
+      // プリント⑨ (133〜148)
+      { text: "いかに殿ばら、殊勝のことは御覧じとがめずや。むげなり。(徒然)", translation: "(それを言わないとは)[   ]。", options: ["もったいない", "まったくひどい", "残念だ", "薄情だ"], answer: 1 },
+      { text: "ただ文字一つにあやしう、あてにもいやしうもなるは、いかなるにかあらむ。(枕)", translation: "言葉一つで不思議に、[   ]も下品にもなるのは、どうしてだろうか。", options: ["上品に", "滑稽に", "粗末に", "最高に"], answer: 0 },
+      { text: "今様は、むげにいやしくこそなりゆくめれ。(徒然)", translation: "当世風は、[   ]下品になっていくようだ。", options: ["本当に", "むやみに", "まったく", "すぐに"], answer: 2 },
+      { text: "昔、男、陸奥の国にすずろに行きいたりにけり。(伊勢)", translation: "昔、ある男が、奥州へ[   ]行き着いた。", options: ["あてもなく", "やっとのことで", "急ぎ足で", "遠回りして"], answer: 0 },
+      { text: "こなたはあらはにや侍らむ。今日しも端におはしましけるかな。(源氏・若紫)", translation: "こちらは[   ]はございませんか。", options: ["不用心で", "あからさまで", " me明らかで", "まる見えで"], answer: 3 },
+      { text: "世になく清らなる玉の男皇子さへ生まれ給ひぬ。(源氏・桐壺)", translation: "世にまたとなく[   ]玉のような皇子までがお生まれになった。", options: ["珍しい", "身分の高い", "かわいい", "美しい"], answer: 3 },
+      { text: "世の例にもなりぬべき御もてなしなり。(源氏・桐壺)", translation: "後世の[   ]になってしまうにちがいないご待遇である。", options: ["語り草", "虚説", "道理", "歴史"], answer: 0 },
+      { text: "一人はいやしき男の貧しき、一人はあてなる男もたりけり。(伊勢)", translation: "もう一人は[   ]男を夫としていた。", options: ["頼りになる", "身分の高い", "見た目のよい", "裕福な"], answer: 1 },
+      { text: "をかしげなる児の、あからさまに抱きて遊ばしうつくしむほどに…(枕)", translation: "かわいらしい幼児が、[   ]抱いて遊ばせかわいがっているうちに…", options: ["ちょっとの間", "懸命に", "わざとらしく", "いつものように"], answer: 0 },
+      { text: "露をなどあだなる物と思ひけむ(古今)", translation: "露をどうして[   ]ものと思っていたのだろう。", options: ["もどかしい", "はかない", "つまらない", "恐ろしい"], answer: 1 },
+      { text: "つらつき、まみのかをれるほどなど、言へばさらなり。(源氏・薄雲)", translation: "頬の形や、目もとが美しく映えて見えるさまなどは、[   ]。", options: ["いまさら言うまでもない", "何ものにも代え難い", "何度でも言いたい", "この世のものとは思えない"], answer: 0 },
+      { text: "いとまめに実用にて、あだなる心なかりけり。(伊勢)", translation: "大変まじめで実直で、[   ]心はなかった。", options: ["不誠実な", "ひどい", "おろかな", "はかない"], answer: 0 },
+      { text: "つた、かへては茂り、もの心細く、すずろなるめを見ることと思ふに…(伊勢)", translation: "[   ](つらい)めに遭うことだと思っていると…", options: ["最低の", "思いがけない", "悲しい", "予想どおりの"], answer: 1 },
+      { text: "いとやむごとなき際にはあらぬが、すぐれて時めき給ふありけり。(源氏・桐壺)", translation: "それほど高貴な[   ]ではない方で…", options: ["貴族", "役職", "程度", "身分"], answer: 3 },
+      { text: "おほやけに御文奉り給ふ。(竹取)", translation: "[   ]にお手紙を差し上げなさる。", options: ["実家", "都", "天皇", "主君"], answer: 2 },
+      { text: "みづからもいみじと思へる気色、かたくななり。(徒然)", translation: "自分でもえらいと思っているようすは、[   ]。", options: ["いじらしい", "奥ゆかしい", "道理に合わない", "見苦しい"], answer: 3 },
+
+      // プリント⑩ (149〜168)
+      { text: "孝養の心なき者も、子持ちてこそ、親の志は思ひ知るなれ。(徒然)", translation: "親孝行の心のない者も、子を持って(はじめて)、親の[   ]はわかるものである。", options: ["苦労", "命令", "愛情", "人生"], answer: 2 },
+      { text: "三月のつごもりなれば、京の花、盛りはみな過ぎにけり。(源氏・若紫)", translation: "旧暦三月の[   ]なので、京の桜の花は、花盛りはみな過ぎてしまった。", options: ["月初め", "月末", "時節", "中旬"], answer: 1 },
+      { text: "ことのついでありて、人の奏しければ、聞こしめしてけり。(大和)", translation: "何かの[   ]があって、ある人が(天皇に) 奏上したので…", options: ["原因", "機会", "前兆", "きまり"], answer: 1 },
+      { text: "才をもととしてこそ、大和魂の世に用ゐらるる voltam 強う侍らめ。(源氏・少女)", translation: "[   ]を基本としてこそ、実務能力が世間に重んじられるということも確実になるのでございましょう。", options: ["和歌", "人格", "家柄", "学問"], answer: 3 },
+      { text: "十七日のつとめて、立つ。(更級)", translation: "十七日の[   ]、出発する。", options: ["早朝", "晩", "数日後", "明後日"], answer: 0 },
+      { text: "かの鬼の虚言は、このしるしを示すなりけりと言ふ人も侍りし。(徒然)", translation: "鬼についての流言は、この(病気流行の)[   ]を示すものだったのだ…", options: ["結果", "現実", "前兆", "災い"], answer: 2 },
+      { text: "ふりにける岩の絶え間より、落ちくる水の音さへ、故びよしある所なり。(平家)", translation: "落ちてくる水の音までが、由緒ありげて[   ]のある所である。", options: ["理由", "風情", "縁", "意味"], answer: 1 },
+      { text: "我を知らずして、外を知るといふ理あるべからず。(徒然)", translation: "自分を知らないで、他人を知るという[   ]があるはずがない。", options: ["前例", "論理", "理想", "道理"], answer: 3 },
+      { text: "四季はなほ定まれるついであり。死期はついてを待たず。(徒然)", translation: "四季はやはり決まった[   ]がある。(しかし人の) 死ぬ時期は順序を待たない。", options: ["変化", "道理", "順序", "行事"], answer: 2 },
+      { text: "見給へば、御息所の御手なり。(源氏・葵)", translation: "ご覧になると、御息所のご[   ]である。", options: ["訪問", "自宅", "筆跡", "尊顔"], answer: 2 },
+      { text: "いとまばゆき、人の御おぼえなり。(源氏・桐壺)", translation: "とても見ていられないほどの、ご[   ]である。", options: ["寵愛", "批判", "信頼", "評判"], answer: 0 },
+      { text: "小式部、これより、歌詠みの世におぼえ出て来にけり。(十訓)", translation: "小式部は、これ以来、歌詠みの世界で[   ]が高くなった。", options: ["悪名", "評判", "気位", "地位"], answer: 1 },
+      { text: "平城の京、春日の里に、しるよしして、狩りに往にけり。(伊勢)", translation: "春日の里に、土地を領有する[   ]て、鷹狩りに行った。", options: ["途中", "縁由", "目的", "仲間"], answer: 1 },
+      { text: "寺にたうときわざすなる、見せたてまつらむ。(大和)", translation: "寺で尊い[   ]をするということだ、お見せ申し上げよう。", options: ["造営", "寄進", "演舞", "仏事"], answer: 3 },
+      { text: "尋常ならぬさまなれども、人に厭はれず、よろづ許されけり。(徒然)", translation: "普通ではないありさまだが、人に嫌がられず、[   ]許された。", options: ["すぐに", "一部", "すべて", "ある程度"], answer: 2 },
+      { text: "観音を頼み奉らんに、その験なしといふことは、あるまじきことなり。(宇治)", translation: "観音様におすがりして、その[   ]がないということは、あるはずがないことだ。", options: ["形跡", "前兆", "ご利益", "理由"], answer: 2 },
+      { text: "うち笑ふことがちにて暮れぬ。つとめて、客人帰りぬる後、心のどかなり。(蜻蛉)", translation: "[   ]、客が帰ってしまった後は、のんびりした気持ちだ。", options: ["翌朝", "翌日", "夕方", "昼過ぎ"], answer: 0 },
+      { text: "人に知られてくるよしもがな(後撰)", translation: "人に知られないで(逢いに)来る[   ]があればいいなあ。", options: ["方法", "時間", "気持ち", "機会"], answer: 0 },
+      { text: "たよりの人に言ひつきて、女は京に来にけり。(大和)", translation: "[   ]の人に頼んで、女は都に来たのだった。", options: ["地元", "ついで", "宮中", "高位"], answer: 1 },
+      { text: "うつつにも夢にも人にあはぬなりけり(伊勢)", translation: "[   ]においても、夢においても、あなたに逢わないのでしたよ。", options: ["ここ", "現実", "事実", "明日"], answer: 1 },
+
+      // プリント⑪ (169〜177)
+      { text: "かくおとなしき心あらむとこそ思はざりしか。(十訓)", translation: "[   ]思慮分別のある心を持っているだろうとは思わなかった。", options: ["どのような", "こうして", "どんなにか", "このように"], answer: 3 },
+      { text: "立て籠めたる所の戸、すなはちただ開きに開きぬ。(竹取)", translation: "閉じ込めてあった所の戸は、[   ]ただもうさっと開いてしまった。", options: ["すぐに", "なぜか", "つまり", "自然と"], answer: 0 },
+      { text: "かの廂に敷かれたりし物は、さながらありや。(大和)", translation: "あの廂の間に敷かれていた物は、[   ](今でも)あるか。", options: ["そのまま", "それならば", "だいたいは", "そのように"], answer: 0 },
+      { text: "この名しかるべからずとて、かの木を伐られにけり。(徒然)", translation: "この名前は(自分に)[   ]ないと言って、その木を切ってしまわれた。", options: ["すばらしく", "みっともなく", "ふさわしく", "おもしろく"], answer: 2 },
+      { text: "まことにさにこそ候ひけれ。(徒然)", translation: "本当に[   ]でございました。", options: ["そう", "すべて", "もとのまま", "普通"], answer: 0 },
+      { text: "用ありて行きたりとも、そのこと果てなば、とく帰るべし。(徒然)", translation: "その用事が終わったならば、[   ]帰るのがよい。", options: ["いったん", "いつかは", "きちんと", "早く"], answer: 3 },
+      { text: "さりぬべきをりみて、対面すべくたばかれ。(源氏・空蝉)", translation: "[   ]ある適当な折を見て、逢えるように工夫せよ。", options: ["このようで", "それほどで", "そのようで", "もっともで"], answer: 2 },
+      { text: "すべてつゆ違ふことなかりけり。(枕)", translation: "すべて[   ]間違うことはなかった。", options: ["そのまま〜ない", "少しも〜ない", "たまに〜ない", "たいして〜ない"], answer: 1 },
+      { text: "今時は逃ぐとも、よも逃がさじ。(宇治)", translation: "今はもう逃げようとしても、(相手は私を)[   ]逃がさないだろう。", options: ["少しも〜ない", "決して〜ない", "まさか〜ない", "たぶん〜ない"], answer: 2 }
+    ];
+
+    let currentQuiz = [];
+    let currentIndex = 0;
+    let playerHP = 100;
+
+    const startScreen = document.getElementById('start-screen');
+    const battleScreen = document.getElementById('battle-screen');
+    const resultScreen = document.getElementById('result-screen');
+    
+    const startBtn = document.getElementById('start-btn');
+    const nextBtn = document.getElementById('next-btn');
+    const restartBtn = document.getElementById('restart-btn');
+
+    const soundBtn = document.getElementById('sound-btn');
+    const soundStatus = document.getElementById('sound-status');
+    const soundIcon = document.getElementById('sound-icon');
+
+    const floorText = document.getElementById('floor-text');
+    const monsterName = document.getElementById('monster-name');
+    const monsterAvatar = document.getElementById('monster-avatar');
+    const monsterHpBar = document.getElementById('monster-hp-bar');
+    const playerHpBar = document.getElementById('player-hp-bar');
+
+    const originalText = document.getElementById('original-text');
+    const translationText = document.getElementById('translation-text');
+    const optionsContainer = document.getElementById('options-container');
+    const feedbackArea = document.getElementById('feedback-area');
+    const feedbackText = document.getElementById('feedback-text');
+    const flashOverlay = document.getElementById('flash-overlay');
+
+    startBtn.addEventListener('click', startGame);
+    nextBtn.addEventListener('click', nextFloor);
+    restartBtn.addEventListener('click', startGame);
+
+    soundBtn.addEventListener('click', () => {
+      audio.enabled = !audio.enabled;
+      soundStatus.textContent = audio.enabled ? "BGM ON" : "MUTED";
+      soundIcon.textContent = audio.enabled ? "🔊" : "🔇";
+      if (!audio.enabled) {
+        audio.stopBGM();
+      } else if (!battleScreen.classList.contains('hidden')) {
+        audio.startBGM();
+      }
+    });
+
+    function startGame() {
+      audio.init();
+      audio.startBGM();
+
+      // 全177問からランダムに5問選出
+      currentQuiz = [...allQuestions].sort(() => 0.5 - Math.random()).slice(0, 5);
+      currentIndex = 0;
+      playerHP = 100;
+      playerHpBar.style.width = '100%';
+
+      startScreen.classList.add('hidden');
+      resultScreen.classList.add('hidden');
+      battleScreen.classList.remove('hidden');
+
+      showFloor();
+    }
+
+    function showFloor() {
+      const q = currentQuiz[currentIndex];
+      const m = monsters[currentIndex];
+
+      floorText.textContent = `${currentIndex + 1} / 5`;
+      monsterName.textContent = m.name;
+      monsterAvatar.innerHTML = m.svg;
+      monsterHpBar.style.width = '100%';
+
+      feedbackArea.classList.add('hidden');
+      optionsContainer.innerHTML = '';
+
+      originalText.textContent = q.text;
+      translationText.textContent = q.translation;
+
+      q.options.forEach((opt, idx) => {
+        const btn = document.createElement('button');
+        btn.className = 'w-full text-left p-3 rounded-lg bg-slate-900 border border-slate-700 hover:bg-slate-800 hover:border-amber-500 text-slate-100 font-medium text-xs sm:text-sm transition flex items-center gap-2';
+        btn.innerHTML = `<span class="bg-slate-800 text-amber-400 border border-amber-600/40 w-5 h-5 flex items-center justify-center rounded text-xs">${idx + 1}</span> <span>${opt}</span>`;
+        btn.addEventListener('click', () => selectOption(idx, btn));
+        optionsContainer.appendChild(btn);
+      });
+    }
+
+    function selectOption(selectedIndex, selectedBtn) {
+      const q = currentQuiz[currentIndex];
+      const buttons = optionsContainer.querySelectorAll('button');
+
+      buttons.forEach(btn => btn.disabled = true);
+
+      if (selectedIndex === q.answer) {
+        audio.playCorrect();
+        setTimeout(() => audio.playHit(), 200);
+
+        monsterAvatar.classList.add('animate-shake');
+        monsterHpBar.style.width = '0%';
+
+        feedbackArea.className = 'mt-2 p-3 bg-emerald-950/80 border border-emerald-600 rounded-lg text-center';
+        feedbackText.className = 'text-emerald-300 text-sm font-bold';
+        feedbackText.textContent = '⚔️ 会心の攻撃！ モンスターを倒した！';
+
+        setTimeout(() => monsterAvatar.classList.remove('animate-shake'), 400);
+
+      } else {
+        audio.playWrong();
+        setTimeout(() => audio.playHit(), 200);
+
+        playerHP = Math.max(0, playerHP - 35);
+        playerHpBar.style.width = `${playerHP}%`;
+
+        flashOverlay.classList.add('animate-flash');
+        monsterAvatar.classList.add('animate-attack');
+
+        feedbackArea.className = 'mt-2 p-3 bg-red-950/80 border border-red-600 rounded-lg text-center';
+        feedbackText.className = 'text-red-300 text-sm font-bold';
+        feedbackText.textContent = `💥 痛恨の一撃を受けた... (正解: ${q.options[q.answer]})`;
+
+        setTimeout(() => {
+          flashOverlay.classList.remove('animate-flash');
+          monsterAvatar.classList.remove('animate-attack');
+        }, 400);
+      }
+
+      feedbackArea.classList.remove('hidden');
+    }
+
+    function nextFloor() {
+      if (playerHP <= 0) {
+        showResult(false);
+        return;
+      }
+
+      currentIndex++;
+      if (currentIndex < 5) {
+        showFloor();
+      } else {
+        showResult(true);
+      }
+    }
+
+    function showResult(isVictory) {
+      battleScreen.classList.add('hidden');
+      resultScreen.classList.remove('hidden');
+
+      const title = document.getElementById('result-title');
+      const icon = document.getElementById('result-icon');
+      const msg = document.getElementById('result-message');
+
+      if (isVictory) {
+        audio.playVictory();
+        title.textContent = "ダンジョン制覇！";
+        title.className = "text-3xl font-extrabold mb-2 font-jp text-amber-400";
+        icon.textContent = "👑";
+        msg.textContent = `見事すべてのモンスターを撃破し、古文ダンジョンを攻略した！ (残りHP: ${playerHP}%)`;
+      } else {
+        audio.playDefeat();
+        title.textContent = "全滅してしまった...";
+        title.className = "text-3xl font-extrabold mb-2 font-jp text-red-500";
+        icon.textContent = "💀";
+        msg.textContent = `力尽きてしまった... もう一度復習してダンジョンに挑もう！`;
+      }
+    }
+  </script>
+</body>
+</html>
